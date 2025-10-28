@@ -87,7 +87,7 @@
     ["ñ", 1],
   ];
 
-  // 語中形（末子音なしの時のみ付加）
+  // 語中形（末子音なしの時のみ付加候補）
   const MEDIALS = ["", "r", "l", "q"];
 
   // ====== 乱数ユーティリティ ======
@@ -124,11 +124,13 @@
 
     const surface = onset + nucleus + coda;
 
-    // 語中形：coda が無い場合のみ末尾に {r,l,q} などを付加
+    // 語中形列の表示ロジック
+    // 1) codaあり → "—"
+    // 2) codaなし → r/l/q なら付与、"" なら "—"
     let medialForm = "—";
     if (coda === "") {
-      const m = choice(MEDIALS);
-      medialForm = surface + (m || ""); // なしなら同一形
+        const m = choice(MEDIALS);
+        medialForm = (m === "") ? "—" : (surface + m);
     }
 
     return [surface, medialForm];
