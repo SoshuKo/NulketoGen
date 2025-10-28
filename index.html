@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ヌルケト語 単語生成器</title>
+<style>
+  :root { --bg:#0e0f12; --fg:#e8e8ea; --muted:#a6a7ab; --acc:#6ea8fe; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif; background: var(--bg); color: var(--fg); }
+  header { padding: 20px 16px; border-bottom: 1px solid #22252b; }
+  h1 { margin: 0; font-size: 20px; }
+  main { padding: 16px; max-width: 900px; margin: 0 auto; }
+  .controls { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+  label { font-size: 14px; color: var(--muted); }
+  input[type="number"]{ width: 120px; padding: 8px 10px; background: #15181f; color: var(--fg); border: 1px solid #2a2f39; border-radius: 8px; }
+  button { padding: 10px 14px; background: var(--acc); color: #06122b; border: none; border-radius: 8px; font-weight: 700; cursor: pointer; }
+  button.secondary{ background:#2a2f39; color:var(--fg); }
+  table { width: 100%; border-collapse: collapse; overflow: hidden; border-radius: 12px; }
+  th, td { padding: 10px 12px; border-bottom: 1px solid #22252b; }
+  th { text-align: left; font-size: 13px; color: var(--muted); background:#12141a; position: sticky; top: 0; }
+  tr:hover td { background: #11151c; }
+  .mono { font-variant-ligatures: none; letter-spacing: .2px; font-size: 16px; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .wrap { overflow:auto; border:1px solid #22252b; border-radius: 12px; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>ヌルケト語 単語生成器（CV(N), 一音節）</h1>
+  </header>
+  <main>
+    <div class="controls">
+      <label for="rows">出力行数</label>
+      <input id="rows" type="number" min="1" max="1000" value="20" />
+      <button id="gen">生成</button>
+      <button id="copy" class="secondary">コピー</button>
+      <span class="hint">濃音（pp, tt, ss, cc, kk）は低確率／末子音なしは高確率で出現します。</span>
+    </div>
+
+    <div class="wrap">
+      <table id="out">
+        <thead>
+          <tr>
+            <th style="width:50%">一列目：語中形なし（基本形）</th>
+            <th style="width:50%">二列目：語中形つき（末子音なしの時のみ）</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </main>
+
+<script>
+(() => {
+  // ====== 音素・トーン定義 ======
+  // 母音（平唇・円唇）：平声／昇声（´）／降声（`）
+  const VOWELS = {
+    unrounded: {
+      level: ["a","aĕ","e","i","uĕ","ai","ei"],
+      acute:  ["á","áĕ","é","í","úĕ","ái","éi"],
+      grave:  ["à","àĕ","è","ì","ùĕ","ài","èi"],
+    },
+    rounded: {
+      level: ["o","oĕ","u","ü","ău","ou"],
+      acute:  ["ó","óĕ","ú","ǘ","ắu","óu"],
+      grave:  ["ò","òĕ","ù","ǜ","ằu","òu"],
+    }
+  };
+
+  const TONES = ["level","acute","grave"]; // 平 / 昇 / 降（等確率）
+
+  // 頭子音（濃音は低確率）。"" はゼロ子音
+  const ONSETS = [
+    ["", 3],
+    ["b", 4], ["p", 3], ["pp", 1], ["m", 4], ["w", 3],
+    ["d", 4], ["t", 3], ["tt", 1], ["n", 4], ["r", 3],
+    ["z", 3], ["s", 3], ["ss", 1],
+    ["c", 3], ["cc", 1], ["j", 3],
+    ["g", 3], ["k", 3], ["kk", 1],
+    ["h", 3],
+  ];
+
+  // 末子音：なし高確率
+  const CODAS = [
+    ["", 7],
+    ["n", 2],
+    ["ñ", 1],
+  ];
+
+  // 語中形（末子音なしの時のみ付加）
+  const MEDIALS = ["", "r", "l", "q"];
+
+  // ====== 乱数ユーティリティ ======
+  function choiceWeighted(pairs) {
+    const total = pairs.reduce((s, [,w]) => s + w, 0);
+    let r = Math.random() * total;
+    for (const [val, w] of pairs) {
+      if ((r -= w) < 0) return val;
+    }
+    return pairs[pairs.length - 1][0];
+  }
+
+  function choice(array) {
+    return array[Math.floor(Math.random() * array.length)];
+  }
+
+  // ====== 単語生成 ======
+  function genWord() {
+    const onset = choiceWeighted(ONSETS);
+
+    // 平唇 or 円唇を等確率で
+    const group = Math.random() < 0.5 ? "unrounded" : "rounded";
+
+    // トーン選択
+    const tone = choice(TONES);
+    const baseList = VOWELS[group][tone];
+
+    // 同一インデックスで対応（a ↔ á ↔ à 等）
+    const idx = Math.floor(Math.random() * baseList.length);
+    const nucleus = baseList[idx];
+
+    // 末子音
+    const coda = choiceWeighted(CODAS);
+
+    const surface = onset + nucleus + coda;
+
+    // 語中形：coda が無い場合のみ末尾に {r,l,q} などを付加
+    let medialForm = "—";
+    if (coda === "") {
+      const m = choice(MEDIALS);
+      medialForm = surface + (m || ""); // なしなら同一形
+    }
+
+    return [surface, medialForm];
+  }
+
+  // ====== 表描画・操作 ======
+  const tbody = document.querySelector("#out tbody");
+  const rowsInput = document.getElementById("rows");
+  const genBtn = document.getElementById("gen");
+  const copyBtn = document.getElementById("copy");
+
+  function render(n) {
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < n; i++) {
+      const [base, medial] = genWord();
+      const tr = document.createElement("tr");
+      const td1 = document.createElement("td");
+      const td2 = document.createElement("td");
+      td1.textContent = base;
+      td2.textContent = medial;
+      td1.className = "mono";
+      td2.className = "mono";
+      tr.appendChild(td1);
+      tr.appendChild(td2);
+      frag.appendChild(tr);
+    }
+    tbody.innerHTML = "";
+    tbody.appendChild(frag);
+  }
+
+  genBtn.addEventListener("click", () => {
+    const n = Math.max(1, Math.min(1000, Number(rowsInput.value) || 1));
+    render(n);
+  });
+
+  copyBtn.addEventListener("click", () => {
+    // TSV でクリップボードへ
+    const lines = [...tbody.querySelectorAll("tr")].map(tr => {
+      const tds = tr.querySelectorAll("td");
+      return `${tds[0].textContent}\t${tds[1].textContent}`;
+    });
+    const text = lines.join("\n");
+    navigator.clipboard.writeText(text).then(() => {
+      copyBtn.textContent = "コピーしました！";
+      setTimeout(() => (copyBtn.textContent = "コピー"), 1200);
+    }).catch(() => {
+      alert("コピーに失敗しました。");
+    });
+  });
+
+  // 初期表示
+  render(Number(rowsInput.value) || 20);
+})();
+</script>
+</body>
+</html>
